@@ -354,15 +354,15 @@ class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
     'Median Filter',
   ];
 
-  final List<double> _winBuf = <double>[];
+  final List<double> _winBuf = <double[];
   double _kalX = 0.0, _kalP = 1.0;
   double _hybX = 0.0, _hybP = 1.0;
 
   UVRecord? _latestRecord;
   int _packetCount = 0;
 
-  final List<UVRecord> _liveRecords = <UVRecord>[];
-  List<UVRecord> _allHistoryRecords = <UVRecord>[];
+  final List<UVRecord> _liveRecords = <UVRecord[];
+  List<UVRecord> _allHistoryRecords = <UVRecord[];
 
   String _periodMode = 'Date';
   int _selectedYear = DateTime.now().year;
@@ -782,7 +782,7 @@ from(bucket: "$_influxBucket")
           final Map<String, dynamic> decoded =
               jsonDecode(res.body) as Map<String, dynamic>;
           final List<dynamic> nets =
-              (decoded['networks'] as List<dynamic>?) ?? <dynamic>[];
+              (decoded['networks'] as List<dynamic>?) ?? <dynamic[];
           setModalState(() {
             scannedNetworks = nets
                 .map((dynamic e) => Map<String, dynamic>.from(e as Map))
@@ -978,7 +978,7 @@ from(bucket: "$_influxBucket")
     if (_liveRecords.length < 3) return 0.0;
     final List<double> vals =
         _liveRecords.map((UVRecord r) => r.getMvByFilter(filterName)).toList();
-    final List<double> diffs = <double>[];
+    final List<double> diffs = <double[];
     for (int i = 1; i < vals.length; i++) {
       diffs.add(vals[i] - vals[i - 1]);
     }
@@ -1017,7 +1017,7 @@ from(bucket: "$_influxBucket")
     final List<UVRecord> source = _getFilteredRecords().isNotEmpty
         ? _getFilteredRecords()
         : _liveRecords;
-    if (source.isEmpty) return <_ChartBucketPoint>[];
+    if (source.isEmpty) return <_ChartBucketPoint[];
 
     final Map<String, List<UVRecord>> grouped = <String, List<UVRecord>>{};
     for (final UVRecord r in source) {
@@ -1033,10 +1033,10 @@ from(bucket: "$_influxBucket")
       } else {
         key = DateFormat('yyyy-MM').format(r.timestamp);
       }
-      grouped.putIfAbsent(key, () => <UVRecord>[]).add(r);
+      grouped.putIfAbsent(key, () => <UVRecord[]).add(r);
     }
 
-    final List<_ChartBucketPoint> points = <_ChartBucketPoint>[];
+    final List<_ChartBucketPoint> points = <_ChartBucketPoint[];
     grouped.forEach((String label, List<UVRecord> recs) {
       final double avgFiltMv = (recs
                   .map((UVRecord e) => e.getMvByFilter(_selectedFilter))
@@ -1070,13 +1070,13 @@ from(bucket: "$_influxBucket")
             r.timestamp.day == _selectedDay);
 
     final Map<int, List<UVRecord>> byHour = <int, List<UVRecord>>{
-      for (int h = 0; h < 24; h++) h: <UVRecord>[]
+      for (int h = 0; h < 24; h++) h: <UVRecord[]
     };
     for (final UVRecord r in dayRecords) {
       byHour[r.timestamp.hour]?.add(r);
     }
 
-    final List<HourlyBucketStat> list24 = <HourlyBucketStat>[];
+    final List<HourlyBucketStat> list24 = <HourlyBucketStat[];
     for (int h = 0; h < 24; h++) {
       final List<UVRecord> items = byHour[h]!;
       double peakUvi = 0.0;
@@ -1111,7 +1111,7 @@ from(bucket: "$_influxBucket")
 
   List<GranularTelemetryRow> _getGranularityTableRows() {
     final List<UVRecord> source = _getFilteredRecords();
-    if (source.isEmpty) return <GranularTelemetryRow>[];
+    if (source.isEmpty) return <GranularTelemetryRow[];
 
     final Map<String, List<UVRecord>> bucketed = <String, List<UVRecord>>{};
     for (final UVRecord r in source.reversed) {
@@ -1125,7 +1125,7 @@ from(bucket: "$_influxBucket")
       } else {
         key = DateFormat('yyyy-MM-dd').format(r.timestamp);
       }
-      bucketed.putIfAbsent(key, () => <UVRecord>[]).add(r);
+      bucketed.putIfAbsent(key, () => <UVRecord[]).add(r);
     }
 
     return bucketed.entries.take(150).map((MapEntry<String, List<UVRecord>> e) {
@@ -1258,7 +1258,7 @@ from(bucket: "$_influxBucket")
           Offset(padLeft, y),
           Offset(width - padRight, y),
           Paint()
-            ..color = Colors.white.withValues(alpha: 0.12)
+            ..color = Colors.white.withOpacity(0.12)
             ..strokeWidth = 1.2,
         );
         _drawCanvasText(
@@ -1270,8 +1270,8 @@ from(bucket: "$_influxBucket")
         );
       }
 
-      final List<Offset> filtCoords = <Offset>[];
-      final List<Offset> rawCoords = <Offset>[];
+      final List<Offset> filtCoords = <Offset[];
+      final List<Offset> rawCoords = <Offset[];
       for (int i = 0; i < pts.length; i++) {
         final double x = pts.length == 1
             ? padLeft + plotW / 2
@@ -1292,7 +1292,7 @@ from(bucket: "$_influxBucket")
         canvas.drawPath(
           rawPath,
           Paint()
-            ..color = const Color(0xFFFF4D6D).withValues(alpha: 0.65)
+            ..color = const Color(0xFFFF4D6D).withOpacity(0.65)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2.5,
         );
@@ -1835,14 +1835,14 @@ from(bucket: "$_influxBucket")
                                   horizontalInterval: 2,
                                   getDrawingHorizontalLine: (double v) => FlLine(
                                     color: isDark
-                                        ? Colors.white.withValues(alpha: 0.07)
-                                        : Colors.black.withValues(alpha: 0.07),
+                                        ? Colors.white.withOpacity(0.07)
+                                        : Colors.black.withOpacity(0.07),
                                     strokeWidth: 1,
                                   ),
                                   getDrawingVerticalLine: (double v) => FlLine(
                                     color: isDark
-                                        ? Colors.white.withValues(alpha: 0.05)
-                                        : Colors.black.withValues(alpha: 0.05),
+                                        ? Colors.white.withOpacity(0.05)
+                                        : Colors.black.withOpacity(0.05),
                                     strokeWidth: 1,
                                   ),
                                 ),
@@ -1922,7 +1922,7 @@ from(bucket: "$_influxBucket")
                                           .toList(),
                                       isCurved: false,
                                       color: const Color(0xFFFF4D6D)
-                                          .withValues(alpha: 0.55),
+                                          .withOpacity(0.55),
                                       barWidth: 1.4,
                                       dashArray: <int>[4, 4],
                                       dotData: const FlDotData(show: false),
@@ -1966,15 +1966,15 @@ from(bucket: "$_influxBucket")
                                         end: Alignment.topCenter,
                                         colors: <Color>[
                                           const Color(0xFF4CAF50)
-                                              .withValues(alpha: 0.35),
+                                              .withOpacity(0.35),
                                           const Color(0xFFFFEB3B)
-                                              .withValues(alpha: 0.40),
+                                              .withOpacity(0.40),
                                           const Color(0xFFFF9800)
-                                              .withValues(alpha: 0.45),
+                                              .withOpacity(0.45),
                                           const Color(0xFFF44336)
-                                              .withValues(alpha: 0.50),
+                                              .withOpacity(0.50),
                                           const Color(0xFF9C27B0)
-                                              .withValues(alpha: 0.55),
+                                              .withOpacity(0.55),
                                         ],
                                       ),
                                     ),
@@ -2145,7 +2145,7 @@ from(bucket: "$_influxBucket")
                                   horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? activeWhoColor.withValues(alpha: 0.16)
+                                    ? activeWhoColor.withOpacity(0.16)
                                     : subCardBg,
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
@@ -2380,7 +2380,7 @@ from(bucket: "$_influxBucket")
                             decoration: BoxDecoration(
                               color: isTop
                                   ? const Color(0xFFFF0055)
-                                      .withValues(alpha: 0.14)
+                                      .withOpacity(0.14)
                                   : subCardBg,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
@@ -2558,7 +2558,7 @@ from(bucket: "$_influxBucket")
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.15),
+        color: c.withOpacity(0.15),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
