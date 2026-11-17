@@ -66,7 +66,6 @@ class _UVMonitorAppV2State extends State<UVMonitorAppV2> {
 
 // ================= 0-3.3V (0-3300mV) PIECEWISE CALIBRATION ENGINE =================
 class GuvaCalibrationEngine {
-  // Scaled proportionally from the 1.17V GUVA-S12SD reference chart to 0 - 3300 mV (3.3V)
   static const List<double> mvThresholds = <double>[
     128.0, 582.0, 815.0, 1046.0, 1290.0, 1554.0,
     1785.0, 2038.0, 2259.0, 2503.0, 2767.0, 3000.0
@@ -91,7 +90,7 @@ class GuvaCalibrationEngine {
       final double vLow = mvThresholds[i];
       final double vHigh = mvThresholds[i + 1];
       if (clamped >= vLow && clamped <= vHigh) {
-        return i + (clamped - vLow) / (vHigh - vLow);
+        return i + (mv - vLow) / (vHigh - vLow);
       }
     }
     return 0.0;
@@ -178,8 +177,7 @@ class UVRecord {
         (((json['med'] ?? hyb) as num).toDouble()).clamp(0.0, 3300.0);
     final double kal =
         (((json['kal'] ?? hyb) as num).toDouble()).clamp(0.0, 3300.0);
-    final double uviCal =
-        GuvaCalibrationEngine.calculateCalibratedUVI(hyb);
+    final double uviCal = GuvaCalibrationEngine.calculateCalibratedUVI(hyb);
     return UVRecord(
       timestamp: DateTime.parse(json['ts'].toString()).toLocal(),
       mvRaw: raw,
@@ -761,7 +759,6 @@ from(bucket: "$_influxBucket")
     _compute3FiltersLocallyAndRecord(raw, -49, source: 'WHO Curve Demo');
   }
 
-  // ================= PHONE-STYLE DYNAMIC WI-FI SETUP MODAL =================
   Future<void> _showPhoneStyleWiFiDialog() async {
     final TextEditingController ssidCtrl = TextEditingController();
     final TextEditingController passCtrl = TextEditingController();
@@ -1148,7 +1145,6 @@ from(bucket: "$_influxBucket")
     }).toList();
   }
 
-  // ================= COMPLETE GRAPH DATA CSV & UNCLIPPED HIGH-RES PNG EXPORT =================
   Future<void> _downloadFullGraphDataCsv() async {
     final List<_ChartBucketPoint> pts = _getAggregatedChartPoints();
     if (pts.isEmpty) {
@@ -1526,7 +1522,7 @@ from(bucket: "$_influxBucket")
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              // ================= 1. GOOGLE WEATHER 7-DAY CALENDAR STRIP =================
+              // 1. GOOGLE WEATHER 7-DAY CALENDAR STRIP
               Container(
                 padding:
                     const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -1607,7 +1603,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 2. HERO UV INDEX & SEMI-CIRCULAR GAUGE CARD =================
+              // 2. HERO UV INDEX & SEMI-CIRCULAR GAUGE CARD
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1696,7 +1692,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 3. GOOGLE WEATHER WHO GRADIENT GRAPH CARD =================
+              // 3. GOOGLE WEATHER WHO GRADIENT GRAPH CARD
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -1780,8 +1776,7 @@ from(bucket: "$_influxBucket")
                               ),
                             ),
                             IconButton(
-                              tooltip:
-                                  'Export Full Unclipped Canvas (PNG)',
+                              tooltip: 'Export Full Unclipped Canvas (PNG)',
                               icon: Icon(Icons.download_rounded,
                                   color: primaryText),
                               onPressed: _exportFullCanvasGraphPng,
@@ -1791,7 +1786,6 @@ from(bucket: "$_influxBucket")
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     if (chartPoints.isNotEmpty)
                       Padding(
                         padding:
@@ -1811,7 +1805,6 @@ from(bucket: "$_influxBucket")
                               .toList(),
                         ),
                       ),
-
                     Container(
                       height: 220,
                       padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
@@ -2010,7 +2003,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 4. CONNECTION & 3-FILTER CONTROL CARD =================
+              // 4. CONNECTION & 3-FILTER CONTROL CARD
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -2186,7 +2179,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 5. PERSONAL UV PROTECTION INSIGHTS CARD =================
+              // 5. PERSONAL UV PROTECTION INSIGHTS CARD
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -2258,7 +2251,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 6. PERIOD FILTER & 24-HOUR DESCENDING PEAK RANKING =================
+              // 6. PERIOD FILTER & 24-HOUR DESCENDING PEAK RANKING
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -2430,7 +2423,7 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // ================= 7. TELEMETRY DATA TABLE & FULL EXPORTS =================
+              // 7. TELEMETRY DATA TABLE & FULL EXPORTS
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(

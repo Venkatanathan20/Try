@@ -26,12 +26,13 @@ jobs:
       - name: Regenerate Fresh Android Gradle Wrapper & Build Release APK
         working-directory: ./mobile_app
         run: |
-          rm -rf android
+          rm -rf android test lib/*.dart
           flutter create --platforms=android --org com.ntust.uvmonitor .
-          # Add INTERNET & network permissions to AndroidManifest.xml
+          rm -rf test
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/><uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"\/><application android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
           cp ../app1.dart lib/main.dart
           flutter pub get
+          flutter analyze lib/main.dart
           flutter build apk --release -t lib/main.dart --android-skip-build-dependency-validation
 
       - name: Upload Compiled APK Artifact
