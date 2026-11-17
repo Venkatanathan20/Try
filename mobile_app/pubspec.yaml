@@ -1,5 +1,5 @@
-name: uv_sensor_updated_app
-description: "ESP32 UV Sensor Calibration & Cloud Hub"
+name: uv_monitor_app
+description: ESP32 UV Sensor Calibration & Cloud Hub
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,17 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  http: ^1.2.0
   fl_chart: ^0.68.0
   intl: ^0.19.0
-  mqtt_client: ^10.2.0
-  path_provider: ^2.1.2
-  share_plus: ^10.0.0
-  shared_preferences: ^2.2.2
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
+  http: ^1.2.1
+  mqtt_client: ^10.2.1
+  path_provider: ^2.1.3
+  share_plus: ^9.0.0
+  shared_preferences: ^2.2.3
 
 flutter:
   uses-material-design: true
