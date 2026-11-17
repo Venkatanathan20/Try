@@ -765,7 +765,7 @@ from(bucket: "$_influxBucket")
     final TextEditingController influxUrlCtrl = TextEditingController();
     final TextEditingController influxTokCtrl = TextEditingController();
 
-    List> scannedNetworks = >[];
+    List> scannedNetworks = [];
     bool isScanning = false;
     bool obscurePass = true;
 
