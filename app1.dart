@@ -354,15 +354,15 @@ class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
     'Median Filter',
   ];
 
-  final List<double> _winBuf = <double[];
+  final List<double> _winBuf = <double>[];
   double _kalX = 0.0, _kalP = 1.0;
   double _hybX = 0.0, _hybP = 1.0;
 
   UVRecord? _latestRecord;
   int _packetCount = 0;
 
-  final List<UVRecord> _liveRecords = <UVRecord[];
-  List<UVRecord> _allHistoryRecords = <UVRecord[];
+  final List<UVRecord> _liveRecords = <UVRecord>[];
+  List<UVRecord> _allHistoryRecords = <UVRecord>[];
 
   String _periodMode = 'Date';
   int _selectedYear = DateTime.now().year;
@@ -765,7 +765,7 @@ from(bucket: "$_influxBucket")
     final TextEditingController influxUrlCtrl = TextEditingController();
     final TextEditingController influxTokCtrl = TextEditingController();
 
-    List> scannedNetworks = [];
+    List<dynamic> scannedNetworks = <dynamic>[];
     bool isScanning = false;
     bool obscurePass = true;
 
@@ -782,11 +782,9 @@ from(bucket: "$_influxBucket")
           final Map<String, dynamic> decoded =
               jsonDecode(res.body) as Map<String, dynamic>;
           final List<dynamic> nets =
-              (decoded['networks'] as List<dynamic>?) ?? <dynamic[];
+              (decoded['networks'] as List<dynamic>?) ?? <dynamic>[];
           setModalState(() {
-            scannedNetworks = nets
-                .map((dynamic e) => Map<String, dynamic>.from(e as Map))
-                .toList();
+            scannedNetworks = nets;
           });
         }
       } catch (_) {}
@@ -851,7 +849,8 @@ from(bucket: "$_influxBucket")
                             itemCount: scannedNetworks.length,
                             itemBuilder: (BuildContext c, int i) {
                               final Map<String, dynamic> net =
-                                  scannedNetworks[i];
+                                  Map<String, dynamic>.from(
+                                      scannedNetworks[i] as Map);
                               final String ssid =
                                   (net['ssid'] ?? '').toString();
                               final int rssi =
@@ -978,7 +977,7 @@ from(bucket: "$_influxBucket")
     if (_liveRecords.length < 3) return 0.0;
     final List<double> vals =
         _liveRecords.map((UVRecord r) => r.getMvByFilter(filterName)).toList();
-    final List<double> diffs = <double[];
+    final List<double> diffs = <double>[];
     for (int i = 1; i < vals.length; i++) {
       diffs.add(vals[i] - vals[i - 1]);
     }
@@ -1017,7 +1016,7 @@ from(bucket: "$_influxBucket")
     final List<UVRecord> source = _getFilteredRecords().isNotEmpty
         ? _getFilteredRecords()
         : _liveRecords;
-    if (source.isEmpty) return <_ChartBucketPoint[];
+    if (source.isEmpty) return <_ChartBucketPoint>[];
 
     final Map<String, List<UVRecord>> grouped = <String, List<UVRecord>>{};
     for (final UVRecord r in source) {
@@ -1033,10 +1032,10 @@ from(bucket: "$_influxBucket")
       } else {
         key = DateFormat('yyyy-MM').format(r.timestamp);
       }
-      grouped.putIfAbsent(key, () => <UVRecord[]).add(r);
+      grouped.putIfAbsent(key, () => <UVRecord>[]).add(r);
     }
 
-    final List<_ChartBucketPoint> points = <_ChartBucketPoint[];
+    final List<_ChartBucketPoint> points = <_ChartBucketPoint>[];
     grouped.forEach((String label, List<UVRecord> recs) {
       final double avgFiltMv = (recs
                   .map((UVRecord e) => e.getMvByFilter(_selectedFilter))
@@ -1070,13 +1069,13 @@ from(bucket: "$_influxBucket")
             r.timestamp.day == _selectedDay);
 
     final Map<int, List<UVRecord>> byHour = <int, List<UVRecord>>{
-      for (int h = 0; h < 24; h++) h: <UVRecord[]
+      for (int h = 0; h < 24; h++) h: <UVRecord>[]
     };
     for (final UVRecord r in dayRecords) {
       byHour[r.timestamp.hour]?.add(r);
     }
 
-    final List<HourlyBucketStat> list24 = <HourlyBucketStat[];
+    final List<HourlyBucketStat> list24 = <HourlyBucketStat>[];
     for (int h = 0; h < 24; h++) {
       final List<UVRecord> items = byHour[h]!;
       double peakUvi = 0.0;
@@ -1111,7 +1110,7 @@ from(bucket: "$_influxBucket")
 
   List<GranularTelemetryRow> _getGranularityTableRows() {
     final List<UVRecord> source = _getFilteredRecords();
-    if (source.isEmpty) return <GranularTelemetryRow[];
+    if (source.isEmpty) return <GranularTelemetryRow>[];
 
     final Map<String, List<UVRecord>> bucketed = <String, List<UVRecord>>{};
     for (final UVRecord r in source.reversed) {
@@ -1125,7 +1124,7 @@ from(bucket: "$_influxBucket")
       } else {
         key = DateFormat('yyyy-MM-dd').format(r.timestamp);
       }
-      bucketed.putIfAbsent(key, () => <UVRecord[]).add(r);
+      bucketed.putIfAbsent(key, () => <UVRecord>[]).add(r);
     }
 
     return bucketed.entries.take(150).map((MapEntry<String, List<UVRecord>> e) {
@@ -1270,8 +1269,8 @@ from(bucket: "$_influxBucket")
         );
       }
 
-      final List<Offset> filtCoords = <Offset[];
-      final List<Offset> rawCoords = <Offset[];
+      final List<Offset> filtCoords = <Offset>[];
+      final List<Offset> rawCoords = <Offset>[];
       for (int i = 0; i < pts.length; i++) {
         final double x = pts.length == 1
             ? padLeft + plotW / 2
