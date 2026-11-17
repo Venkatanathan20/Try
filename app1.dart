@@ -43,14 +43,14 @@ class _UVMonitorAppV2State extends State<UVMonitorAppV2> {
       title: 'Google Weather Style UV Hub V2',
       themeMode: _themeMode,
       theme: ThemeData.light(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFFF4F6FA),
+        scaffoldBackgroundColor: const Color(0xFFF2F4F8),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF0077B6),
           brightness: Brightness.light,
         ),
       ),
       darkTheme: ThemeData.dark(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFF111318),
+        scaffoldBackgroundColor: const Color(0xFF0E1015),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF8AB4F8),
           brightness: Brightness.dark,
@@ -258,7 +258,7 @@ class GoogleWeatherUvArcPainter extends CustomPainter {
     final Rect arcRect = Rect.fromCircle(center: center, radius: radius);
 
     final Paint bgPaint = Paint()
-      ..color = isDarkMode ? Colors.white12 : Colors.black12
+      ..color = isDarkMode ? const Color(0xFF2D323E) : Colors.black12
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10
       ..strokeCap = StrokeCap.round;
@@ -268,12 +268,12 @@ class GoogleWeatherUvArcPainter extends CustomPainter {
       startAngle: 0.0,
       endAngle: 2 * pi,
       colors: <Color>[
-        Color(0xFF4CAF50),
+        Color(0xFF2ECC71),
         Color(0xFFFFEB3B),
         Color(0xFFFF9800),
         Color(0xFFF44336),
         Color(0xFF9C27B0),
-        Color(0xFF4CAF50),
+        Color(0xFF2ECC71),
       ],
       stops: <double>[0.0, 0.25, 0.45, 0.65, 0.85, 1.0],
       transform: GradientRotation(0.75 * pi),
@@ -324,6 +324,8 @@ class UVMonitorScreenV2 extends StatefulWidget {
 class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
   final TextEditingController _ipController =
       TextEditingController(text: '192.168.0.117');
+  final ScrollController _graphScrollController = ScrollController();
+  final ScrollController _hourlyStripScrollController = ScrollController();
 
   static const String _influxBaseUrl =
       'https://us-east-1-1.aws.cloud2.influxdata.com';
@@ -370,7 +372,7 @@ class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
   int _selectedWeek = ((DateTime.now().day - 1) ~/ 7) + 1;
   int _selectedDay = DateTime.now().day;
 
-  String _graphGranularity = 'Minutes';
+  String _graphGranularity = 'Seconds';
   String _timeGranularity = 'Seconds';
 
   static const List<String> _monthNames = <String>[
@@ -391,7 +393,21 @@ class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
     _influxSyncTimer?.cancel();
     _mqttClient?.disconnect();
     _ipController.dispose();
+    _graphScrollController.dispose();
+    _hourlyStripScrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollToLatestGraphPoint() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_graphScrollController.hasClients) {
+        _graphScrollController.animateTo(
+          _graphScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _startAlwaysOnSync() {
@@ -434,11 +450,12 @@ class _UVMonitorScreenV2State extends State<UVMonitorScreenV2> {
         _allHistoryRecords = loaded;
         _liveRecords
           ..clear()
-          ..addAll(loaded.length > 60
-              ? loaded.sublist(loaded.length - 60)
+          ..addAll(loaded.length > 200
+              ? loaded.sublist(loaded.length - 200)
               : loaded);
         _latestRecord = loaded.last;
       });
+      _scrollToLatestGraphPoint();
     }
   }
 
@@ -496,7 +513,7 @@ from(bucket: "$_influxBucket")
   |> filter(fn: (r) => r["_field"] == "voltage_raw_mv" or r["_field"] == "voltage_median_mv" or r["_field"] == "voltage_kalman_mv" or r["_field"] == "voltage_hybrid_mv" or r["_field"] == "uv_index_estimated")
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: false)
-  |> tail(n: 120)
+  |> tail(n: 500)
 ''';
 
       final Uri uri =
@@ -595,8 +612,8 @@ from(bucket: "$_influxBucket")
         }
         _liveRecords
           ..clear()
-          ..addAll(_allHistoryRecords.length > 60
-              ? _allHistoryRecords.sublist(_allHistoryRecords.length - 60)
+          ..addAll(_allHistoryRecords.length > 200
+              ? _allHistoryRecords.sublist(_allHistoryRecords.length - 200)
               : _allHistoryRecords);
         _packetCount += newPointsAdded;
         _status = 'InfluxDB + HiveMQ Synced • #$_packetCount';
@@ -721,13 +738,22 @@ from(bucket: "$_influxBucket")
       rssi: rssi,
     );
 
+    final bool wasAtRightEdge = !_graphScrollController.hasClients ||
+        (_graphScrollController.position.maxScrollExtent -
+                _graphScrollController.offset) <
+            60;
+
     setState(() {
       _latestRecord = rec;
       _packetCount++;
       _status = '$source • #$_packetCount';
       _liveRecords.add(rec);
-      if (_liveRecords.length > 60) _liveRecords.removeAt(0);
+      if (_liveRecords.length > 200) _liveRecords.removeAt(0);
     });
+
+    if (wasAtRightEdge) {
+      _scrollToLatestGraphPoint();
+    }
 
     _saveRecordToHistory(rec);
   }
@@ -1058,7 +1084,7 @@ from(bucket: "$_influxBucket")
       ));
     });
 
-    return points.length > 80 ? points.sublist(points.length - 80) : points;
+    return points;
   }
 
   List<HourlyBucketStat> _get24HrList({required bool descending}) {
@@ -1218,35 +1244,36 @@ from(bucket: "$_influxBucket")
     }
 
     try {
-      const double width = 1800;
-      const double height = 960;
+      final double width =
+          max(1800.0, pts.length * 75.0 + 240.0).clamp(1800.0, 8000.0);
+      const double height = 1040;
       const double padLeft = 110;
-      const double padRight = 90;
-      const double padTop = 140;
-      const double padBottom = 150;
-      const double plotW = width - padLeft - padRight;
+      const double padRight = 110;
+      const double padTop = 160;
+      const double padBottom = 170;
+      final double plotW = width - padLeft - padRight;
       const double plotH = height - padTop - padBottom;
 
       final ui.PictureRecorder recorder = ui.PictureRecorder();
       final Canvas canvas = Canvas(recorder);
 
       canvas.drawRect(
-        const Rect.fromLTWH(0, 0, width, height),
-        Paint()..color = const Color(0xFF111318),
+        Rect.fromLTWH(0, 0, width, height),
+        Paint()..color = const Color(0xFF13161C),
       );
 
       _drawCanvasText(
         canvas,
-        'World Health Organization UVI — Full Unclipped Curve ($_selectedFilter • $_graphGranularity)',
-        const Offset(padLeft, 42),
+        'World Health Organization UVI — Full Historical Graph ($_selectedFilter • $_graphGranularity)',
+        const Offset(padLeft, 36),
         fontSize: 28,
         fontWeight: FontWeight.bold,
         color: Colors.white,
       );
       _drawCanvasText(
         canvas,
-        'Exported: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}  |  Range: 0 - 3300 mV (0-3.3V)  |  Total Plotted Buckets: ${pts.length}',
-        const Offset(padLeft, 84),
+        'Date: $_selectedDay ${_monthNames[_selectedMonth - 1]} $_selectedYear  |  Scale: 0-3300 mV (0-3.3V)  |  Points: ${pts.length}  |  Exported: ${DateFormat('HH:mm:ss').format(DateTime.now())}',
+        const Offset(padLeft, 78),
         fontSize: 18,
         color: Colors.white70,
       );
@@ -1262,9 +1289,16 @@ from(bucket: "$_influxBucket")
         );
         _drawCanvasText(
           canvas,
+          'UVI $uvi',
+          Offset(padLeft - 72, y - 10),
+          fontSize: 16,
+          color: Colors.white70,
+        );
+        _drawCanvasText(
+          canvas,
           '$uvi',
-          Offset(padLeft - 45, y - 10),
-          fontSize: 18,
+          Offset(width - padRight + 16, y - 10),
+          fontSize: 16,
           color: Colors.white70,
         );
       }
@@ -1284,7 +1318,8 @@ from(bucket: "$_influxBucket")
       }
 
       if (_overlayRawOnChart && rawCoords.length > 1) {
-        final Path rawPath = Path()..moveTo(rawCoords.first.dx, rawCoords.first.dy);
+        final Path rawPath = Path()
+          ..moveTo(rawCoords.first.dx, rawCoords.first.dy);
         for (int i = 1; i < rawCoords.length; i++) {
           rawPath.lineTo(rawCoords[i].dx, rawCoords[i].dy);
         }
@@ -1320,7 +1355,7 @@ from(bucket: "$_influxBucket")
             Color(0xFF9B59B6),
           ],
           stops: <double>[0.0, 0.25, 0.50, 0.75, 1.0],
-        ).createShader(const Rect.fromLTWH(padLeft, padTop, plotW, plotH));
+        ).createShader(Rect.fromLTWH(padLeft, padTop, plotW, plotH));
 
         canvas.drawPath(
           areaPath,
@@ -1334,21 +1369,28 @@ from(bucket: "$_influxBucket")
           Paint()
             ..shader = whoGradient
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 5.0
+            ..strokeWidth = 4.5
             ..strokeCap = StrokeCap.round,
         );
       }
 
-      final int step = max(1, (pts.length / 8).floor());
+      final int step = max(1, (pts.length / 20).ceil());
       for (int i = 0; i < pts.length; i += step) {
-        final double x = pts.length == 1
-            ? padLeft + plotW / 2
-            : padLeft + (i / (pts.length - 1)) * plotW;
+        final Offset pt = filtCoords[i];
+        canvas.drawCircle(pt, 5.0, Paint()..color = Colors.white);
+        _drawCanvasText(
+          canvas,
+          '${pts[i].uviFiltered.toStringAsFixed(1)} (${pts[i].mvFiltered.toStringAsFixed(0)}mV)',
+          Offset(pt.dx - 36, max(padTop - 28, pt.dy - 28)),
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+          color: const Color(0xFF2ECC71),
+        );
         _drawCanvasText(
           canvas,
           pts[i].label,
-          Offset(x - 32, padTop + plotH + 24),
-          fontSize: 16,
+          Offset(pt.dx - 30, padTop + plotH + 22),
+          fontSize: 15,
           color: Colors.white70,
         );
       }
@@ -1393,7 +1435,7 @@ from(bucket: "$_influxBucket")
   }
 
   Color _getWhoColor(double uvi) {
-    if (uvi < 3.0) return const Color(0xFF4CAF50);
+    if (uvi < 3.0) return const Color(0xFF1FD671); // Vibrant green matching reference image
     if (uvi < 6.0) return const Color(0xFFFFC107);
     if (uvi < 8.0) return const Color(0xFFFF9800);
     if (uvi < 11.0) return const Color(0xFFF44336);
@@ -1424,16 +1466,40 @@ from(bucket: "$_influxBucket")
     );
   }
 
+  // Unified Outer Card Decoration matching the reference screenshot
+  BoxDecoration _outerCardDecoration(bool isDark) {
+    return BoxDecoration(
+      color: isDark ? const Color(0xFF1B1E26) : const Color(0xFFFFFFFF),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(
+        color: isDark ? const Color(0xFF2D323E) : const Color(0xFFDCE1E9),
+        width: 1.2,
+      ),
+    );
+  }
+
+  // Unified Inner Capsule/Block Decoration matching the reference screenshot
+  BoxDecoration _innerBlockDecoration(bool isDark,
+      {double radius = 18.0, Color? highlightBorder}) {
+    return BoxDecoration(
+      color: isDark ? const Color(0xFF13161C) : const Color(0xFFF3F6FA),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(
+        color: highlightBorder ??
+            (isDark ? const Color(0xFF2A2E39) : const Color(0xFFD5DCE6)),
+        width: highlightBorder != null ? 1.5 : 1.0,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isDark = widget.isDarkMode;
-    final Color cardBg =
-        isDark ? const Color(0xFF1C1F26) : const Color(0xFFFFFFFF);
-    final Color subCardBg =
-        isDark ? const Color(0xFF252932) : const Color(0xFFF0F4F9);
+    final Color innerBg =
+        isDark ? const Color(0xFF13161C) : const Color(0xFFF3F6FA);
     final Color primaryText = isDark ? Colors.white : const Color(0xFF1A1C1E);
     final Color secondaryText =
-        isDark ? Colors.white70 : const Color(0xFF5F6368);
+        isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368);
 
     final double activeMv =
         (_latestRecord?.getMvByFilter(_selectedFilter) ?? 0.0)
@@ -1462,6 +1528,10 @@ from(bucket: "$_influxBucket")
         List<int>.generate((currentYear - 2020) + 1, (int i) => 2020 + i);
     final int maxDays = _daysInMonth(_selectedYear, _selectedMonth);
     if (_selectedDay > maxDays) _selectedDay = maxDays;
+
+    final double screenW = MediaQuery.of(context).size.width;
+    final double minViewportW = max(220.0, screenW - 96.0);
+    final double dynamicChartW = max(minViewportW, chartPoints.length * 62.0);
 
     return Scaffold(
       appBar: AppBar(
@@ -1521,14 +1591,11 @@ from(bucket: "$_influxBucket")
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              // 1. GOOGLE WEATHER 7-DAY CALENDAR STRIP
+              // ================= 1. GOOGLE WEATHER 7-DAY CALENDAR STRIP =================
               Container(
                 padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   children: <Widget>[
                     Row(
@@ -1547,47 +1614,60 @@ from(bucket: "$_influxBucket")
                               _selectedMonth = dt.month;
                               _selectedDay = dt.day;
                             });
+                            _scrollToLatestGraphPoint();
                           },
-                          child: Column(
-                            children: <Widget>[
-                              Text(
-                                dayLetter,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: secondaryText,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Container(
-                                width: 36,
-                                height: 36,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isSelected
-                                      ? (isDark
-                                          ? Colors.white
-                                          : const Color(0xFF1A73E8))
-                                      : Colors.transparent,
-                                ),
-                                child: Text(
-                                  '${dt.day}',
+                          child: Container(
+                            width: 42,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: _innerBlockDecoration(
+                              isDark,
+                              radius: 16,
+                              highlightBorder:
+                                  isSelected ? activeWhoColor : null,
+                            ),
+                            child: Column(
+                              children: <Widget>[
+                                Text(
+                                  dayLetter,
                                   style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: isSelected
-                                        ? (isDark ? Colors.black : Colors.white)
-                                        : primaryText,
+                                    fontSize: 11,
+                                    color: secondaryText,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 6),
+                                Container(
+                                  width: 28,
+                                  height: 28,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: isSelected
+                                        ? (isDark
+                                            ? Colors.white
+                                            : const Color(0xFF1A73E8))
+                                        : Colors.transparent,
+                                  ),
+                                  child: Text(
+                                    '${dt.day}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected
+                                          ? (isDark
+                                              ? Colors.black
+                                              : Colors.white)
+                                          : primaryText,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       }).toList(),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Text(
                       DateFormat('EEEE, d MMMM yyyy').format(
                           DateTime(_selectedYear, _selectedMonth, _selectedDay)),
@@ -1602,13 +1682,10 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // 2. HERO UV INDEX & SEMI-CIRCULAR GAUGE CARD
+              // ================= 2. HERO UV INDEX & SEMI-CIRCULAR GAUGE CARD =================
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: _outerCardDecoration(isDark),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
@@ -1645,176 +1722,174 @@ from(bucket: "$_influxBucket")
                               color: activeWhoColor,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Filtered: ${activeMv.toStringAsFixed(1)} mV  •  Raw: ${rawMv.toStringAsFixed(1)} mV',
-                            style:
-                                TextStyle(fontSize: 12, color: secondaryText),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: _innerBlockDecoration(isDark, radius: 12),
+                            child: Text(
+                              'Filtered: ${activeMv.toStringAsFixed(1)} mV  •  Raw: ${rawMv.toStringAsFixed(1)} mV',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: secondaryText),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    Column(
-                      children: <Widget>[
-                        SizedBox(
-                          width: 92,
-                          height: 92,
-                          child: CustomPaint(
-                            painter: GoogleWeatherUvArcPainter(
-                              uvi: activeUvi,
-                              isDarkMode: isDark,
-                            ),
-                            child: Center(
-                              child: Text(
-                                '$discreteUvi',
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
-                                  color: primaryText,
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: _innerBlockDecoration(isDark, radius: 20),
+                      child: Column(
+                        children: <Widget>[
+                          SizedBox(
+                            width: 88,
+                            height: 88,
+                            child: CustomPaint(
+                              painter: GoogleWeatherUvArcPainter(
+                                uvi: activeUvi,
+                                isDarkMode: isDark,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$discreteUvi',
+                                  style: TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                    color: primaryText,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        Text(
-                          'Max UV: ${maxDayUvi.toStringAsFixed(1)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: secondaryText,
+                          Text(
+                            'Max UV: ${maxDayUvi.toStringAsFixed(1)}',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: secondaryText,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
 
-              // 3. GOOGLE WEATHER WHO GRADIENT GRAPH CARD
+              // ================= 3. SCROLLABLE WHO GRADIENT GRAPH CARD =================
               Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                padding: const EdgeInsets.all(16),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: <Widget>[
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.baseline,
-                              textBaseline: TextBaseline.alphabetic,
-                              children: <Widget>[
-                                Text(
-                                  activeUvi.toStringAsFixed(0),
-                                  style: TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.w800,
-                                    color: primaryText,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.baseline,
+                                textBaseline: TextBaseline.alphabetic,
+                                children: <Widget>[
+                                  Text(
+                                    activeUvi.toStringAsFixed(0),
+                                    style: TextStyle(
+                                      fontSize: 30,
+                                      fontWeight: FontWeight.w800,
+                                      color: primaryText,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  activeRisk,
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    color: secondaryText,
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      activeRisk,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w600,
+                                        color: secondaryText,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            Text(
-                              'World Health Organization UVI (0-3.3V Scale)',
-                              style: TextStyle(
-                                  fontSize: 12, color: secondaryText),
-                            ),
-                          ],
+                                ],
+                              ),
+                              Text(
+                                'WHO UVI (0-3.3V Scale) • Swipe graph left/right',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 11, color: secondaryText),
+                              ),
+                            ],
+                          ),
                         ),
-                        Row(
-                          children: <Widget>[
-                            Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
-                              decoration: BoxDecoration(
-                                color: subCardBg,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: _graphGranularity,
-                                  items: <String>[
-                                    'Seconds',
-                                    'Minutes',
-                                    'Hours',
-                                    'Days',
-                                    'Months'
-                                  ]
-                                      .map((String g) =>
-                                          DropdownMenuItem<String>(
-                                            value: g,
-                                            child: Text(g,
-                                                style: TextStyle(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: primaryText)),
-                                          ))
-                                      .toList(),
-                                  onChanged: (String? val) {
-                                    if (val != null) {
-                                      setState(() => _graphGranularity = val);
-                                    }
-                                  },
-                                ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 2),
+                          decoration: _innerBlockDecoration(isDark, radius: 16),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _graphGranularity,
+                              isDense: true,
+                              items: <String>[
+                                'Seconds',
+                                'Minutes',
+                                'Hours',
+                                'Days',
+                                'Months'
+                              ]
+                                  .map((String g) => DropdownMenuItem<String>(
+                                        value: g,
+                                        child: Text(g,
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: primaryText)),
+                                      ))
+                                  .toList(),
+                              onChanged: (String? val) {
+                                if (val != null) {
+                                  setState(() => _graphGranularity = val);
+                                  _scrollToLatestGraphPoint();
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          decoration: _innerBlockDecoration(isDark, radius: 14),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: _exportFullCanvasGraphPng,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 8),
+                              child: Icon(
+                                Icons.download_rounded,
+                                size: 20,
+                                color: primaryText,
                               ),
                             ),
-                            IconButton(
-                              tooltip: 'Export Full Unclipped Canvas (PNG)',
-                              icon: Icon(Icons.download_rounded,
-                                  color: primaryText),
-                              onPressed: _exportFullCanvasGraphPng,
-                            ),
-                          ],
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    if (chartPoints.isNotEmpty)
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: 6.0, right: 24.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: chartPoints
-                              .take(8)
-                              .map((_ChartBucketPoint p) => Text(
-                                    p.uviFiltered.toStringAsFixed(0),
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: secondaryText,
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ),
+
                     Container(
-                      height: 220,
-                      padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF15181E)
-                            : const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                            color: isDark ? Colors.white10 : Colors.black12),
-                      ),
+                      height: 256,
+                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 10),
+                      decoration: _innerBlockDecoration(isDark, radius: 20),
                       child: chartPoints.isEmpty
                           ? Center(
                               child: Text(
@@ -1823,192 +1898,436 @@ from(bucket: "$_influxBucket")
                                     color: secondaryText, fontSize: 12),
                               ),
                             )
-                          : LineChart(
-                              LineChartData(
-                                minY: 0,
-                                maxY: 12,
-                                clipData: const FlClipData.all(),
-                                gridData: FlGridData(
-                                  show: true,
-                                  drawVerticalLine: true,
-                                  horizontalInterval: 2,
-                                  getDrawingHorizontalLine: (double v) => FlLine(
-                                    color: isDark
-                                        ? Colors.white.withOpacity(0.07)
-                                        : Colors.black.withOpacity(0.07),
-                                    strokeWidth: 1,
-                                  ),
-                                  getDrawingVerticalLine: (double v) => FlLine(
-                                    color: isDark
-                                        ? Colors.white.withOpacity(0.05)
-                                        : Colors.black.withOpacity(0.05),
-                                    strokeWidth: 1,
-                                  ),
-                                ),
-                                borderData: FlBorderData(show: false),
-                                titlesData: FlTitlesData(
-                                  topTitles: const AxisTitles(
-                                      sideTitles:
-                                          SideTitles(showTitles: false)),
-                                  leftTitles: const AxisTitles(
-                                      sideTitles:
-                                          SideTitles(showTitles: false)),
-                                  rightTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 26,
-                                      interval: 1,
-                                      getTitlesWidget:
-                                          (double val, TitleMeta meta) {
-                                        final int v = val.toInt();
-                                        if (v >= 0 && v <= 12) {
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                                left: 6.0),
-                                            child: Text(
-                                              '$v',
-                                              style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: secondaryText),
+                          : Row(
+                              children: <Widget>[
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    controller: _graphScrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const BouncingScrollPhysics(),
+                                    child: SizedBox(
+                                      width: dynamicChartW,
+                                      child: Column(
+                                        children: <Widget>[
+                                          SizedBox(
+                                            height: 18,
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.spaceAround,
+                                              children: (chartPoints.length > 10
+                                                      ? chartPoints.sublist(
+                                                          chartPoints.length -
+                                                              10)
+                                                      : chartPoints)
+                                                  .map((_ChartBucketPoint p) =>
+                                                      Text(
+                                                        p.uviFiltered
+                                                            .toStringAsFixed(0),
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: secondaryText,
+                                                        ),
+                                                      ))
+                                                  .toList(),
                                             ),
-                                          );
-                                        }
-                                        return const SizedBox.shrink();
-                                      },
-                                    ),
-                                  ),
-                                  bottomTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 24,
-                                      interval: (chartPoints.length > 5)
-                                          ? (chartPoints.length / 5)
-                                              .floorToDouble()
-                                          : 1,
-                                      getTitlesWidget:
-                                          (double val, TitleMeta meta) {
-                                        final int idx = val.toInt();
-                                        if (idx >= 0 &&
-                                            idx < chartPoints.length) {
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                                top: 6.0),
-                                            child: Text(
-                                              chartPoints[idx].label,
-                                              style: TextStyle(
-                                                  fontSize: 9,
-                                                  color: secondaryText),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Expanded(
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 16.0),
+                                              child: LineChart(
+                                                LineChartData(
+                                                  minY: 0,
+                                                  maxY: 12,
+                                                  clipData:
+                                                      const FlClipData.all(),
+                                                  gridData: FlGridData(
+                                                    show: true,
+                                                    drawVerticalLine: true,
+                                                    horizontalInterval: 2,
+                                                    getDrawingHorizontalLine:
+                                                        (double v) => FlLine(
+                                                      color: isDark
+                                                          ? Colors.white
+                                                              .withOpacity(0.07)
+                                                          : Colors.black
+                                                              .withOpacity(
+                                                                  0.07),
+                                                      strokeWidth: 1,
+                                                    ),
+                                                    getDrawingVerticalLine:
+                                                        (double v) => FlLine(
+                                                      color: isDark
+                                                          ? Colors.white
+                                                              .withOpacity(0.05)
+                                                          : Colors.black
+                                                              .withOpacity(
+                                                                  0.05),
+                                                      strokeWidth: 1,
+                                                    ),
+                                                  ),
+                                                  borderData:
+                                                      FlBorderData(show: false),
+                                                  titlesData: FlTitlesData(
+                                                    topTitles: const AxisTitles(
+                                                        sideTitles: SideTitles(
+                                                            showTitles: false)),
+                                                    leftTitles:
+                                                        const AxisTitles(
+                                                            sideTitles:
+                                                                SideTitles(
+                                                                    showTitles:
+                                                                        false)),
+                                                    rightTitles:
+                                                        const AxisTitles(
+                                                            sideTitles:
+                                                                SideTitles(
+                                                                    showTitles:
+                                                                        false)),
+                                                    bottomTitles: AxisTitles(
+                                                      sideTitles: SideTitles(
+                                                        showTitles: true,
+                                                        reservedSize: 28,
+                                                        interval: 1,
+                                                        getTitlesWidget:
+                                                            (double val,
+                                                                TitleMeta
+                                                                    meta) {
+                                                          final int idx =
+                                                              val.toInt();
+                                                          if (idx < 0 ||
+                                                              idx >=
+                                                                  chartPoints
+                                                                      .length) {
+                                                            return const SizedBox
+                                                                .shrink();
+                                                          }
+                                                          final int step =
+                                                              chartPoints.length <=
+                                                                      6
+                                                                  ? 1
+                                                                  : max(
+                                                                      1,
+                                                                      (chartPoints.length /
+                                                                              6)
+                                                                          .round());
+                                                          if (idx % step != 0 &&
+                                                              idx !=
+                                                                  chartPoints
+                                                                          .length -
+                                                                      1) {
+                                                            return const SizedBox
+                                                                .shrink();
+                                                          }
+                                                          return Padding(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .only(
+                                                                    top: 8.0),
+                                                            child: Text(
+                                                              chartPoints[idx]
+                                                                  .label,
+                                                              style: TextStyle(
+                                                                fontSize: 9.5,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color:
+                                                                    secondaryText,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  lineBarsData: <
+                                                      LineChartBarData>[
+                                                    if (_overlayRawOnChart)
+                                                      LineChartBarData(
+                                                        spots: chartPoints
+                                                            .asMap()
+                                                            .entries
+                                                            .map((MapEntry<int,
+                                                                        _ChartBucketPoint>
+                                                                    e) =>
+                                                                FlSpot(
+                                                                    e.key
+                                                                        .toDouble(),
+                                                                    e.value
+                                                                        .uviRaw
+                                                                        .clamp(
+                                                                            0.0,
+                                                                            12.0)))
+                                                            .toList(),
+                                                        isCurved: false,
+                                                        color: const Color(
+                                                                0xFFFF4D6D)
+                                                            .withOpacity(0.55),
+                                                        barWidth: 1.4,
+                                                        dashArray: <int>[4, 4],
+                                                        dotData:
+                                                            const FlDotData(
+                                                                show: false),
+                                                      ),
+                                                    LineChartBarData(
+                                                      spots: chartPoints
+                                                          .asMap()
+                                                          .entries
+                                                          .map((MapEntry<int,
+                                                                      _ChartBucketPoint>
+                                                                  e) =>
+                                                              FlSpot(
+                                                                  e.key
+                                                                      .toDouble(),
+                                                                  e.value
+                                                                      .uviFiltered
+                                                                      .clamp(
+                                                                          0.0,
+                                                                          12.0)))
+                                                          .toList(),
+                                                      isCurved: true,
+                                                      curveSmoothness: 0.35,
+                                                      preventCurveOvershootingThreshold:
+                                                          10.0,
+                                                      gradient:
+                                                          const LinearGradient(
+                                                        begin: Alignment
+                                                            .bottomCenter,
+                                                        end:
+                                                            Alignment.topCenter,
+                                                        colors: <Color>[
+                                                          Color(0xFF2ECC71),
+                                                          Color(0xFFFFEB3B),
+                                                          Color(0xFFFF9800),
+                                                          Color(0xFFF44336),
+                                                          Color(0xFF9C27B0),
+                                                        ],
+                                                      ),
+                                                      barWidth: 3.5,
+                                                      dotData: FlDotData(
+                                                        show: true,
+                                                        checkToShowDot: (FlSpot
+                                                                    spot,
+                                                                LineChartBarData
+                                                                    barData) =>
+                                                            spot ==
+                                                            barData.spots.last,
+                                                      ),
+                                                      belowBarData: BarAreaData(
+                                                        show: true,
+                                                        gradient:
+                                                            LinearGradient(
+                                                          begin: Alignment
+                                                              .bottomCenter,
+                                                          end: Alignment
+                                                              .topCenter,
+                                                          colors: <Color>[
+                                                            const Color(
+                                                                    0xFF2ECC71)
+                                                                .withOpacity(
+                                                                    0.35),
+                                                            const Color(
+                                                                    0xFFFFEB3B)
+                                                                .withOpacity(
+                                                                    0.40),
+                                                            const Color(
+                                                                    0xFFFF9800)
+                                                                .withOpacity(
+                                                                    0.45),
+                                                            const Color(
+                                                                    0xFFF44336)
+                                                                .withOpacity(
+                                                                    0.50),
+                                                            const Color(
+                                                                    0xFF9C27B0)
+                                                                .withOpacity(
+                                                                    0.55),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
                                             ),
-                                          );
-                                        }
-                                        return const SizedBox.shrink();
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                lineBarsData: <LineChartBarData>[
-                                  if (_overlayRawOnChart)
-                                    LineChartBarData(
-                                      spots: chartPoints
-                                          .asMap()
-                                          .entries
-                                          .map((MapEntry<int, _ChartBucketPoint>
-                                                  e) =>
-                                              FlSpot(
-                                                  e.key.toDouble(),
-                                                  e.value.uviRaw
-                                                      .clamp(0.0, 12.0)))
-                                          .toList(),
-                                      isCurved: false,
-                                      color: const Color(0xFFFF4D6D)
-                                          .withOpacity(0.55),
-                                      barWidth: 1.4,
-                                      dashArray: <int>[4, 4],
-                                      dotData: const FlDotData(show: false),
-                                    ),
-                                  LineChartBarData(
-                                    spots: chartPoints
-                                        .asMap()
-                                        .entries
-                                        .map((MapEntry<int, _ChartBucketPoint>
-                                                e) =>
-                                            FlSpot(
-                                                e.key.toDouble(),
-                                                e.value.uviFiltered
-                                                    .clamp(0.0, 12.0)))
-                                        .toList(),
-                                    isCurved: true,
-                                    curveSmoothness: 0.35,
-                                    preventCurveOvershootingThreshold: 10.0,
-                                    gradient: const LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: <Color>[
-                                        Color(0xFF4CAF50),
-                                        Color(0xFFFFEB3B),
-                                        Color(0xFFFF9800),
-                                        Color(0xFFF44336),
-                                        Color(0xFF9C27B0),
-                                      ],
-                                    ),
-                                    barWidth: 3.5,
-                                    dotData: FlDotData(
-                                      show: true,
-                                      checkToShowDot: (FlSpot spot,
-                                              LineChartBarData barData) =>
-                                          spot == barData.spots.last,
-                                    ),
-                                    belowBarData: BarAreaData(
-                                      show: true,
-                                      gradient: LinearGradient(
-                                        begin: Alignment.bottomCenter,
-                                        end: Alignment.topCenter,
-                                        colors: <Color>[
-                                          const Color(0xFF4CAF50)
-                                              .withOpacity(0.35),
-                                          const Color(0xFFFFEB3B)
-                                              .withOpacity(0.40),
-                                          const Color(0xFFFF9800)
-                                              .withOpacity(0.45),
-                                          const Color(0xFFF44336)
-                                              .withOpacity(0.50),
-                                          const Color(0xFF9C27B0)
-                                              .withOpacity(0.55),
+                                          ),
                                         ],
                                       ),
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 6),
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                      top: 22.0, bottom: 28.0),
+                                  child: Column(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: List<Widget>.generate(
+                                      13,
+                                      (int i) => Text(
+                                        '${12 - i}',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: secondaryText,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      DateFormat('d MMMM yyyy').format(
-                          DateTime(_selectedYear, _selectedMonth, _selectedDay)),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: primaryText,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _getSunProtectionWindowText(hourlyChronological),
-                      style: TextStyle(fontSize: 13, color: secondaryText),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                DateFormat('d MMMM yyyy').format(DateTime(
+                                    _selectedYear,
+                                    _selectedMonth,
+                                    _selectedDay)),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryText,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _getSunProtectionWindowText(
+                                    hourlyChronological),
+                                style: TextStyle(
+                                    fontSize: 12, color: secondaryText),
+                              ),
+                            ],
+                          ),
+                        ),
+                        FilledButton.tonalIcon(
+                          onPressed: _exportFullCanvasGraphPng,
+                          icon: const Icon(Icons.download_rounded, size: 16),
+                          label: const Text(
+                            'Download Full Graph',
+                            style: TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
 
-              // 4. CONNECTION & 3-FILTER CONTROL CARD
+              // ================= 4. HOURLY UV FORECAST & SENSOR LOG (EXACT MATCH TO SCREENSHOT) =================
+              Container(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                decoration: _outerCardDecoration(isDark),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 20,
+                          color: secondaryText,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Hourly UV Forecast & Sensor Log',
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w700,
+                            color: primaryText,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SingleChildScrollView(
+                      controller: _hourlyStripScrollController,
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: hourlyChronological.map((HourlyBucketStat hr) {
+                          final Color hrColor = _getWhoColor(hr.peakUvi);
+                          final bool isCurrentHour =
+                              DateTime.now().year == _selectedYear &&
+                                  DateTime.now().month == _selectedMonth &&
+                                  DateTime.now().day == _selectedDay &&
+                                  DateTime.now().hour == hr.hour;
+                          return Container(
+                            width: 72,
+                            margin: const EdgeInsets.only(right: 10),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 14, horizontal: 6),
+                            decoration: _innerBlockDecoration(
+                              isDark,
+                              radius: 20,
+                              highlightBorder:
+                                  isCurrentHour ? hrColor : null,
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Text(
+                                  hr.peakUvi.toStringAsFixed(1),
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: primaryText,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Icon(
+                                  Icons.wb_twilight_rounded,
+                                  color: hrColor,
+                                  size: 24,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  '${hr.avgMv.toStringAsFixed(0)}mV',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w500,
+                                    color: secondaryText,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  hr.timeSlot,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: primaryText,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // ================= 5. CONNECTION & 3-FILTER CONTROL CARD =================
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -2024,23 +2343,24 @@ from(bucket: "$_influxBucket")
                     Row(
                       children: <Widget>[
                         Expanded(
-                          child: TextField(
-                            controller: _ipController,
-                            style: TextStyle(
-                                color: primaryText,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13),
-                            decoration: InputDecoration(
-                              labelText: 'ESP32 Local IP (or 192.168.4.1 Setup)',
-                              prefixIcon: const Icon(Icons.router_rounded,
-                                  size: 18),
-                              filled: true,
-                              fillColor: subCardBg,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide.none,
+                          child: Container(
+                            decoration: _innerBlockDecoration(isDark, radius: 14),
+                            child: TextField(
+                              controller: _ipController,
+                              style: TextStyle(
+                                  color: primaryText,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13),
+                              decoration: const InputDecoration(
+                                labelText:
+                                    'ESP32 Local IP (or 192.168.4.1 Setup)',
+                                prefixIcon:
+                                    Icon(Icons.router_rounded, size: 18),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                isDense: true,
                               ),
-                              isDense: true,
                             ),
                           ),
                         ),
@@ -2051,7 +2371,7 @@ from(bucket: "$_influxBucket")
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: <Widget>[
@@ -2093,25 +2413,29 @@ from(bucket: "$_influxBucket")
                                 color: primaryText)),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _selectedFilter,
-                              isExpanded: true,
-                              items: _filterOptions
-                                  .map((String f) => DropdownMenuItem<String>(
-                                        value: f,
-                                        child: Text(f,
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: primaryText)),
-                                      ))
-                                  .toList(),
-                              onChanged: (String? val) {
-                                if (val != null) {
-                                  setState(() => _selectedFilter = val);
-                                }
-                              },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            decoration: _innerBlockDecoration(isDark, radius: 12),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedFilter,
+                                isExpanded: true,
+                                items: _filterOptions
+                                    .map((String f) => DropdownMenuItem<String>(
+                                          value: f,
+                                          child: Text(f,
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: primaryText)),
+                                        ))
+                                    .toList(),
+                                onChanged: (String? val) {
+                                  if (val != null) {
+                                    setState(() => _selectedFilter = val);
+                                  }
+                                },
+                              ),
                             ),
                           ),
                         ),
@@ -2125,7 +2449,7 @@ from(bucket: "$_influxBucket")
                                 TextStyle(fontSize: 11, color: secondaryText)),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
@@ -2141,17 +2465,12 @@ from(bucket: "$_influxBucket")
                             child: Container(
                               margin: const EdgeInsets.only(right: 8),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? activeWhoColor.withOpacity(0.16)
-                                    : subCardBg,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? activeWhoColor
-                                      : Colors.transparent,
-                                ),
+                                  horizontal: 12, vertical: 10),
+                              decoration: _innerBlockDecoration(
+                                isDark,
+                                radius: 16,
+                                highlightBorder:
+                                    isSelected ? activeWhoColor : null,
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2161,6 +2480,7 @@ from(bucket: "$_influxBucket")
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
                                           color: primaryText)),
+                                  const SizedBox(height: 3),
                                   Text(
                                     '${val.toStringAsFixed(1)} mV  (σ=${sigma.toStringAsFixed(2)})',
                                     style: TextStyle(
@@ -2178,13 +2498,10 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // 5. PERSONAL UV PROTECTION INSIGHTS CARD
+              // ================= 6. PERSONAL UV PROTECTION INSIGHTS CARD =================
               Container(
                 padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -2203,25 +2520,33 @@ from(bucket: "$_influxBucket")
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    _insightBullet(
-                      icon: Icons.wb_twilight_rounded,
-                      title: 'Sunscreen',
-                      subtitle: activeUvi >= 3.0
-                          ? 'Apply broad-spectrum SPF 30+ sunscreen and reapply every 2 hours while outdoors.'
-                          : 'UV Index is below 3. Sunscreen is optional unless outdoors for extended periods.',
-                      primaryText: primaryText,
-                      secondaryText: secondaryText,
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: _innerBlockDecoration(isDark, radius: 16),
+                      child: _insightBullet(
+                        icon: Icons.wb_twilight_rounded,
+                        title: 'Sunscreen',
+                        subtitle: activeUvi >= 3.0
+                            ? 'Apply broad-spectrum SPF 30+ sunscreen and reapply every 2 hours while outdoors.'
+                            : 'UV Index is below 3. Sunscreen is optional unless outdoors for extended periods.',
+                        primaryText: primaryText,
+                        secondaryText: secondaryText,
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    _insightBullet(
-                      icon: Icons.checkroom_rounded,
-                      title: 'Clothing & Shade',
-                      subtitle: activeUvi >= 6.0
-                          ? 'High/Very High UV detected. Wear a wide-brimmed sunhat, UV-blocking sunglasses, and seek shade between 10 AM and 4 PM.'
-                          : 'Lightweight breathable clothing and sunglasses recommended for bright daylight.',
-                      primaryText: primaryText,
-                      secondaryText: secondaryText,
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: _innerBlockDecoration(isDark, radius: 16),
+                      child: _insightBullet(
+                        icon: Icons.checkroom_rounded,
+                        title: 'Clothing & Shade',
+                        subtitle: activeUvi >= 6.0
+                            ? 'High/Very High UV detected. Wear a wide-brimmed sunhat, UV-blocking sunglasses, and seek shade between 10 AM and 4 PM.'
+                            : 'Lightweight breathable clothing and sunglasses recommended for bright daylight.',
+                        primaryText: primaryText,
+                        secondaryText: secondaryText,
+                      ),
                     ),
                     const Divider(height: 22),
                     Text(
@@ -2234,7 +2559,7 @@ from(bucket: "$_influxBucket")
                       runSpacing: 6,
                       children: <Widget>[
                         _whoBandLabelLine(
-                            '0-2 Low', const Color(0xFF4CAF50), secondaryText),
+                            '0-2 Low', const Color(0xFF1FD671), secondaryText),
                         _whoBandLabelLine('3-5 Moderate',
                             const Color(0xFFFFC107), secondaryText),
                         _whoBandLabelLine(
@@ -2250,13 +2575,10 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // 6. PERIOD FILTER & 24-HOUR DESCENDING PEAK RANKING
+              // ================= 7. PERIOD FILTER & 24-HOUR DESCENDING PEAK RANKING =================
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -2304,7 +2626,7 @@ from(bucket: "$_influxBucket")
                         _buildDropdownChip<int>(
                           label: 'Year',
                           value: _selectedYear,
-                          subCardBg: subCardBg,
+                          isDark: isDark,
                           primaryText: primaryText,
                           items: yearOptions
                               .map((int y) => DropdownMenuItem<int>(
@@ -2317,7 +2639,7 @@ from(bucket: "$_influxBucket")
                           _buildDropdownChip<int>(
                             label: 'Month',
                             value: _selectedMonth,
-                            subCardBg: subCardBg,
+                            isDark: isDark,
                             primaryText: primaryText,
                             items: List<DropdownMenuItem<int>>.generate(
                               12,
@@ -2333,7 +2655,7 @@ from(bucket: "$_influxBucket")
                           _buildDropdownChip<int>(
                             label: 'Week',
                             value: _selectedWeek,
-                            subCardBg: subCardBg,
+                            isDark: isDark,
                             primaryText: primaryText,
                             items: List<DropdownMenuItem<int>>.generate(
                               5,
@@ -2349,7 +2671,7 @@ from(bucket: "$_influxBucket")
                           _buildDropdownChip<int>(
                             label: 'Date',
                             value: _selectedDay,
-                            subCardBg: subCardBg,
+                            isDark: isDark,
                             primaryText: primaryText,
                             items: List<DropdownMenuItem<int>>.generate(
                               maxDays,
@@ -2366,27 +2688,21 @@ from(bucket: "$_influxBucket")
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
-                      height: 190,
+                      height: 195,
                       child: ListView.builder(
                         itemCount: hourlyRankedDesc.length,
                         itemBuilder: (BuildContext ctx, int idx) {
                           final HourlyBucketStat hr = hourlyRankedDesc[idx];
                           final bool isTop = idx == 0;
                           return Container(
-                            margin: const EdgeInsets.symmetric(vertical: 3),
+                            margin: const EdgeInsets.symmetric(vertical: 3.5),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 9),
-                            decoration: BoxDecoration(
-                              color: isTop
-                                  ? const Color(0xFFFF0055)
-                                      .withOpacity(0.14)
-                                  : subCardBg,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isTop
-                                    ? const Color(0xFFFF0055)
-                                    : Colors.transparent,
-                              ),
+                                horizontal: 14, vertical: 10),
+                            decoration: _innerBlockDecoration(
+                              isDark,
+                              radius: 14,
+                              highlightBorder:
+                                  isTop ? const Color(0xFFFF0055) : null,
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2422,13 +2738,10 @@ from(bucket: "$_influxBucket")
               ),
               const SizedBox(height: 12),
 
-              // 7. TELEMETRY DATA TABLE & FULL EXPORTS
+              // ================= 8. TELEMETRY DATA TABLE & FULL EXPORTS =================
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: _outerCardDecoration(isDark),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -2443,30 +2756,44 @@ from(bucket: "$_influxBucket")
                             color: primaryText,
                           ),
                         ),
-                        DropdownButton<String>(
-                          value: _timeGranularity,
-                          items: <String>['Seconds', 'Minutes', 'Hours', 'Day']
-                              .map((String unit) => DropdownMenuItem<String>(
-                                    value: unit,
-                                    child: Text(unit,
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: primaryText)),
-                                  ))
-                              .toList(),
-                          onChanged: (String? v) {
-                            if (v != null) {
-                              setState(() => _timeGranularity = v);
-                            }
-                          },
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: _innerBlockDecoration(isDark, radius: 14),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _timeGranularity,
+                              isDense: true,
+                              items: <String>[
+                                'Seconds',
+                                'Minutes',
+                                'Hours',
+                                'Day'
+                              ]
+                                  .map((String unit) =>
+                                      DropdownMenuItem<String>(
+                                        value: unit,
+                                        child: Text(unit,
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: primaryText)),
+                                      ))
+                                  .toList(),
+                              onChanged: (String? v) {
+                                if (v != null) {
+                                  setState(() => _timeGranularity = v);
+                                }
+                              },
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 190,
+                    const SizedBox(height: 10),
+                    Container(
+                      height: 195,
                       width: double.infinity,
+                      decoration: _innerBlockDecoration(isDark, radius: 18),
                       child: granularRows.isEmpty
                           ? Center(
                               child: Text(
@@ -2553,12 +2880,13 @@ from(bucket: "$_influxBucket")
   }
 
   Widget _statusChip({required String label, required bool ok}) {
-    final Color c = ok ? const Color(0xFF4CAF50) : Colors.orange;
+    final Color c = ok ? const Color(0xFF1FD671) : Colors.orange;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: c.withOpacity(0.15),
         borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.withOpacity(0.4)),
       ),
       child: Text(
         label,
@@ -2615,17 +2943,14 @@ from(bucket: "$_influxBucket")
   Widget _buildDropdownChip<T>({
     required String label,
     required T value,
-    required Color subCardBg,
+    required bool isDark,
     required Color primaryText,
     required List<DropdownMenuItem<T>> items,
     required ValueChanged<T?> onChanged,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      decoration: BoxDecoration(
-        color: subCardBg,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: _innerBlockDecoration(isDark, radius: 14),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
