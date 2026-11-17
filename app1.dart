@@ -40,7 +40,7 @@ class UVMonitorApp extends StatelessWidget {
   }
 }
 
-// ================= PIECEWISE CALIBRATION ENGINE (TASK 1) =================
+// ================= PIECEWISE CALIBRATION ENGINE (0-3.3V / 0-3300mV SCALE) =================
 class GuvaCalibrationEngine {
   static const List<double> mvThresholds = <double>[
     128.0, 582.0, 815.0, 1046.0, 1290.0, 1554.0,
@@ -68,7 +68,7 @@ class GuvaCalibrationEngine {
     return 0.0;
   }
 
-  static double calculateOldLinearUVI(double mv) => mv / 100.0;
+  static double calculateOldLinearUVI(double mv) => mv / 256.4;
 
   static String getRiskCategory(double uvi) {
     if (uvi < 3.0) return 'Low';
@@ -150,7 +150,9 @@ class UVRecord {
       mvKalman: ((json['kal'] ?? hyb) as num).toDouble(),
       mvHybrid: hyb,
       uviCalibrated: uviCal,
-      uviLinearOld: ((json['uvi_lin'] ?? (hyb / 100.0)) as num).toDouble(),
+      uviLinearOld: ((json['uvi_lin'] ??
+              GuvaCalibrationEngine.calculateOldLinearUVI(hyb)) as num)
+          .toDouble(),
       uviLookupInt: ((json['uvi_int'] ??
               GuvaCalibrationEngine.lookupDiscreteUVI(hyb)) as num)
           .toInt(),
@@ -615,9 +617,9 @@ from(bucket: "$_influxBucket")
 
   void _generateDemoPoint() {
     final Random rng = Random();
-    final double baseMv = 380.0 + sin(_packetCount * 0.2) * 260.0;
-    final double whiteNoise = (rng.nextDouble() - 0.5) * 30.0;
-    final double wifiSpike = (rng.nextInt(4) == 0) ? 165.0 : 0.0;
+    final double baseMv = 980.0 + sin(_packetCount * 0.2) * 670.0;
+    final double whiteNoise = (rng.nextDouble() - 0.5) * 75.0;
+    final double wifiSpike = (rng.nextInt(4) == 0) ? 420.0 : 0.0;
     final double raw = (baseMv + whiteNoise + wifiSpike).clamp(50.0, 3300.0);
     _compute3FiltersLocallyAndRecord(raw, -51,
         source: 'Demo Noise Filter Test');
