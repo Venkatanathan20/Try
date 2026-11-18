@@ -9,14 +9,12 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// ================= 1. WIFI & NETWORK CREDENTIALS =================
 const char* WIFI_SSID     = "Nokia";
 const char* WIFI_PASSWORD = "Password";
 
-// ================= 2. PIN DEFINITIONS ==================
-#define UV_SENSOR_PIN 2   // GUVA-S12SD SIG pin (ADC1_CH2)
-#define I2C_SDA_PIN   8   // OLED SDA pin
-#define I2C_SCL_PIN   9   // OLED SCL pin
+#define UV_SENSOR_PIN 2
+#define I2C_SDA_PIN   8
+#define I2C_SCL_PIN   9
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT 64
 
@@ -25,7 +23,6 @@ WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-// ================= 3. MQTT & INFLUXDB CONFIG =============
 const char* MQTT_BROKER   = "broker.hivemq.com";
 const int   MQTT_PORT     = 1883;
 const char* MQTT_TOPIC    = "venkat_iot/sensors/uv/node_01";
@@ -34,7 +31,6 @@ const char* DEVICE_ID     = "ESP32_node_01";
 #define INFLUXDB_URL    "https://us-east-1-1.aws.cloud2.influxdata.com/api/v2/write?org=IOT&bucket=uv_sensor_data&precision=s"
 #define INFLUXDB_TOKEN  "Dbzt7IHP3G4E4McgOmsRBrZLUaK2fsEgexNVFzYSQI1V2PhqWbL6SFhB64Vg-jOY6HQIu7BibH8jkSQvHqLNWw=="
 
-// ================= 4. DSP & FILTER STATE ===============
 #define MEDIAN_WIN_SIZE 9
 float winBuf[MEDIAN_WIN_SIZE];
 int winCount = 0;
@@ -56,18 +52,15 @@ float currentUvIndex  = 0.0f;
 String currentRisk    = "Low";
 int currentRssi       = 0;
 
-// ================= 5. 0-3.3V (0-3300mV) FULL-RANGE GUVA-S12SD TABLE ============
-// UVI 0: <128mV | UVI 1: 582mV  | UVI 2: 815mV  | UVI 3: 1046mV | UVI 4: 1290mV | UVI 5: 1554mV
-// UVI 6: 1785mV | UVI 7: 2038mV | UVI 8: 2259mV | UVI 9: 2503mV | UVI 10: 2767mV | UVI 11: 3000mV (UVI 12 = 3233mV)
+// Expanded 0-4500mV Sunlight Scale so direct sun doesn't peg at 12 immediately
 const float UVI_THRESHOLDS[12] = {
-  128.0f, 582.0f, 815.0f, 1046.0f, 1290.0f, 1554.0f,
-  1785.0f, 2038.0f, 2259.0f, 2503.0f, 2767.0f, 3000.0f
+  128.0f, 680.0f, 980.0f, 1300.0f, 1650.0f, 2000.0f,
+  2350.0f, 2700.0f, 3050.0f, 3400.0f, 3800.0f, 4150.0f
 };
 
 float getCalibratedUVI(float mv) {
   if (mv < UVI_THRESHOLDS[0]) return 0.0f;
   if (mv >= UVI_THRESHOLDS[11]) {
-    // Slope above 3000 mV (UVI 11): 1 UVI per 233 mV (reaches UVI 12.0 at 3233 mV)
     float finalSlope = (11.0f - 10.0f) / (UVI_THRESHOLDS[11] - UVI_THRESHOLDS[10]);
     float uvi = 11.0f + ((mv - UVI_THRESHOLDS[11]) * finalSlope);
     return (uvi > 12.0f) ? 12.0f : uvi;
@@ -96,33 +89,21 @@ String getShortOledRisk(float uvi) {
   return "Extreme";
 }
 
-// ================= 6. SENSOR & FILTER PROCESSING (0-3.3V / 0-3300mV) ========
-// The ESP32-C3 internal ADC eFuse curve saturates at 2942 mV when the physical pin is at 3.25V-3.30V.
-// Scaling by (3250.0f / 2942.0f = 1.1047f) maps the full 0..2942 mV ADC range linearly to 0..3250 mV (3.25V),
-// allowing the sensor to reach 3000 mV (UVI 11.0) and 3233+ mV (UVI 12.0 Extreme)!
-const float ADC_TO_3V3_RAIL_SCALE = 3250.0f / 2942.0f;
-
 float readAveragedMilliVolts() {
   uint32_t totalMv = 0;
   for (int i = 0; i < 32; i++) {
     totalMv += analogReadMilliVolts(UV_SENSOR_PIN);
     delayMicroseconds(250);
   }
-  return (totalMv / 32.0f) * ADC_TO_3V3_RAIL_SCALE;
+  return (totalMv / 32.0f);
 }
 
 void updateFiltersAndSensors() {
   float raw = readAveragedMilliVolts();
-
-  // Anything below UVI_THRESHOLDS[0] (128.0 mV) is dark/indoor noise floor -> 0.0 mV
-  if (raw < UVI_THRESHOLDS[0]) {
-    raw = 0.0f;
-  }
-
-  float clampedRaw = constrain(raw, 0.0f, 3300.0f);
+  if (raw < UVI_THRESHOLDS[0]) raw = 0.0f;
+  float clampedRaw = constrain(raw, 0.0f, 4500.0f);
   currentMvRaw = clampedRaw;
 
-  // Tier 1: 9-Point Median Filter
   winBuf[winIdx] = clampedRaw;
   winIdx = (winIdx + 1) % MEDIAN_WIN_SIZE;
   if (winCount < MEDIAN_WIN_SIZE) winCount++;
@@ -138,7 +119,6 @@ void updateFiltersAndSensors() {
   }
   currentMvMedian = sorted[winCount / 2];
 
-  // Tier 2 & 3: 1D Kalman & Hybrid Filters (with instant zero-reset in darkness)
   if (clampedRaw == 0.0f && currentMvMedian == 0.0f) {
     kalX = 0.0f;
     hybX = 0.0f;
@@ -158,8 +138,8 @@ void updateFiltersAndSensors() {
     hybP = (1.0f - hG) * hybP;
   }
 
-  currentMvKalman = constrain(kalX, 0.0f, 3300.0f);
-  currentMvHybrid = constrain(hybX, 0.0f, 3300.0f);
+  currentMvKalman = constrain(kalX, 0.0f, 4500.0f);
+  currentMvHybrid = constrain(hybX, 0.0f, 4500.0f);
 
   if (currentMvHybrid < UVI_THRESHOLDS[0]) {
     currentMvHybrid = 0.0f;
@@ -173,7 +153,6 @@ void updateFiltersAndSensors() {
   currentRssi    = WiFi.RSSI();
 }
 
-// ================= 7. HTTP SERVER ENDPOINT =============
 void handleJsonData() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -196,7 +175,6 @@ void handleJsonData() {
   server.send(200, "application/json", response);
 }
 
-// ================= 8. WIFI CONNECTION (STA ONLY - NO AP) ==================
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
@@ -209,31 +187,21 @@ void connectWiFi() {
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
     display.println("Connecting Wi-Fi...");
-    display.print("SSID: ");
-    display.println(WIFI_SSID);
     display.display();
   }
-
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("ESP32 Connected!");
-  display.setCursor(0, 16);
-  display.println("IP Address:");
-  display.setCursor(0, 32);
-  display.println(WiFi.localIP().toString());
+  display.println("Connected!");
   display.display();
-  delay(2000);
+  delay(1500);
 }
 
-// ================= 9. CLOUD STREAMING ==================
 void publishToInfluxDb() {
   if (WiFi.status() != WL_CONNECTED) return;
   static int cloudSyncCounter = 0;
   cloudSyncCounter++;
-  if (cloudSyncCounter < 5) {
-    return; 
-  }
+  if (cloudSyncCounter < 5) return;
   cloudSyncCounter = 0;
 
   NetworkClientSecure client;
@@ -256,7 +224,6 @@ void publishToInfluxDb() {
   }
 }
 
-// ================= 10. SETUP & LOOP ====================
 void setup() {
   Serial.begin(115200);
   analogReadResolution(12);
@@ -280,11 +247,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
-
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
-
+  if (WiFi.status() != WL_CONNECTED) connectWiFi();
   if (!mqttClient.connected()) {
     String clientId = String(DEVICE_ID) + "_" + String(random(0xffff), HEX);
     mqttClient.connect(clientId.c_str());
@@ -298,7 +261,6 @@ void loop() {
 
     updateFiltersAndSensors();
 
-    // Publish to MQTT (HiveMQ)
     JsonDocument doc;
     doc["seq"]                = packetSeq;
     doc["device_id"]          = DEVICE_ID;
@@ -314,10 +276,8 @@ void loop() {
     serializeJson(doc, jsonBuffer);
     mqttClient.publish(MQTT_TOPIC, jsonBuffer);
 
-    // Publish to InfluxDB Cloud
     publishToInfluxDb();
 
-    // OLED Display Update (Fits cleanly on 4 lines without wrapping)
     String oledRisk = getShortOledRisk(currentUvIndex);
     display.clearDisplay();
     display.setTextSize(1);
