@@ -10,8 +10,8 @@
 #include <Adafruit_SSD1306.h>
 
 // ================= 1. WIFI & NETWORK CREDENTIALS =================
-const char* WIFI_SSID     = "IB707";
-const char* WIFI_PASSWORD = "IB707IB707";
+const char* WIFI_SSID     = "Nokia";
+const char* WIFI_PASSWORD = "Password";
 
 // ================= 2. PIN DEFINITIONS ==================
 #define UV_SENSOR_PIN 2   // GUVA-S12SD SIG pin (ADC1_CH2)
@@ -57,7 +57,6 @@ String currentRisk    = "Low";
 int currentRssi       = 0;
 
 // ================= 5. 0-3.3V (0-3300mV) FULL-RANGE GUVA-S12SD TABLE ============
-// Proportionally scaled from the 1.17V GUVA-S12SD chart across the 0-3.3V (0-3300mV) op-amp range:
 // UVI 0: <128mV | UVI 1: 582mV  | UVI 2: 815mV  | UVI 3: 1046mV | UVI 4: 1290mV | UVI 5: 1554mV
 // UVI 6: 1785mV | UVI 7: 2038mV | UVI 8: 2259mV | UVI 9: 2503mV | UVI 10: 2767mV | UVI 11: 3000mV (UVI 12 = 3233mV)
 const float UVI_THRESHOLDS[12] = {
@@ -68,9 +67,10 @@ const float UVI_THRESHOLDS[12] = {
 float getCalibratedUVI(float mv) {
   if (mv < UVI_THRESHOLDS[0]) return 0.0f;
   if (mv >= UVI_THRESHOLDS[11]) {
-    // Slope above 3000 mV (UVI 11): 1 UVI per 233 mV (reaches UVI 12.0 at 3233 mV / ~3.3V)
+    // Slope above 3000 mV (UVI 11): 1 UVI per 233 mV (reaches UVI 12.0 at 3233 mV)
     float finalSlope = (11.0f - 10.0f) / (UVI_THRESHOLDS[11] - UVI_THRESHOLDS[10]);
-    return 11.0f + ((mv - UVI_THRESHOLDS[11]) * finalSlope);
+    float uvi = 11.0f + ((mv - UVI_THRESHOLDS[11]) * finalSlope);
+    return (uvi > 12.0f) ? 12.0f : uvi;
   }
   for (int i = 0; i < 11; i++) {
     if (mv >= UVI_THRESHOLDS[i] && mv <= UVI_THRESHOLDS[i+1]) {
@@ -88,18 +88,30 @@ String getRiskCategory(float uvi) {
   return "Extreme";
 }
 
-// ================= 6. SENSOR & FILTER PROCESSING (DIRECT 0-3300mV) ========
+String getShortOledRisk(float uvi) {
+  if (uvi < 3.0f)  return "Low";
+  if (uvi < 6.0f)  return "Mod";
+  if (uvi < 8.0f)  return "High";
+  if (uvi < 11.0f) return "V.High";
+  return "Extreme";
+}
+
+// ================= 6. SENSOR & FILTER PROCESSING (0-3.3V / 0-3300mV) ========
+// The ESP32-C3 internal ADC eFuse curve saturates at 2942 mV when the physical pin is at 3.25V-3.30V.
+// Scaling by (3250.0f / 2942.0f = 1.1047f) maps the full 0..2942 mV ADC range linearly to 0..3250 mV (3.25V),
+// allowing the sensor to reach 3000 mV (UVI 11.0) and 3233+ mV (UVI 12.0 Extreme)!
+const float ADC_TO_3V3_RAIL_SCALE = 3250.0f / 2942.0f;
+
 float readAveragedMilliVolts() {
   uint32_t totalMv = 0;
   for (int i = 0; i < 32; i++) {
     totalMv += analogReadMilliVolts(UV_SENSOR_PIN);
     delayMicroseconds(250);
   }
-  return totalMv / 32.0f;
+  return (totalMv / 32.0f) * ADC_TO_3V3_RAIL_SCALE;
 }
 
 void updateFiltersAndSensors() {
-  // Read direct 1:1 physical voltage across the full 0 - 3300 mV (3.3V) range
   float raw = readAveragedMilliVolts();
 
   // Anything below UVI_THRESHOLDS[0] (128.0 mV) is dark/indoor noise floor -> 0.0 mV
@@ -305,7 +317,8 @@ void loop() {
     // Publish to InfluxDB Cloud
     publishToInfluxDb();
 
-    // OLED Display Update (ONLY displays IP, never AP)
+    // OLED Display Update (Fits cleanly on 4 lines without wrapping)
+    String oledRisk = getShortOledRisk(currentUvIndex);
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
@@ -313,7 +326,7 @@ void loop() {
     display.printf("IP:%s\n", WiFi.localIP().toString().c_str());
     display.println("--------------------");
     display.printf("Hyb mV: %.2f\n", currentMvHybrid);
-    display.printf("UV Idx: %.3f (%s)\n", currentUvIndex, currentRisk.c_str());
+    display.printf("UV Idx: %.2f (%s)\n", currentUvIndex, oledRisk.c_str());
     display.printf("RSSI:   %d dBm (#%lu)\n", currentRssi, packetSeq);
     display.display();
   }
