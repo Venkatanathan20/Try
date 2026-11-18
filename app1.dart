@@ -66,34 +66,16 @@ class _UVMonitorAppV2State extends State<UVMonitorAppV2> {
 
 // ================= 0-3.3V (0-3300mV) PIECEWISE CALIBRATION ENGINE =================
 class GuvaCalibrationEngine {
-  static const List<double> mvThresholds = <double>[
-    128.0, 582.0, 815.0, 1046.0, 1290.0, 1554.0,
-    1785.0, 2038.0, 2259.0, 2503.0, 2767.0, 3000.0
-  ];
-
   static int lookupDiscreteUVI(double mv) {
     final double clamped = mv.clamp(0.0, 3300.0);
-    if (clamped < 128.0) return 0;
-    for (int uvi = 11; uvi >= 1; uvi--) {
-      if (clamped >= mvThresholds[uvi]) return uvi;
-    }
-    return 0;
+    if (clamped < 50.0) return 0;
+    return calculateCalibratedUVI(clamped).floor().clamp(0, 12);
   }
 
   static double calculateCalibratedUVI(double mv) {
     final double clamped = mv.clamp(0.0, 3300.0);
-    if (clamped < 128.0) return 0.0;
-    if (clamped >= 3000.0) {
-      return (11.0 + (clamped - 3000.0) / 233.0).clamp(0.0, 12.0);
-    }
-    for (int i = 0; i < 11; i++) {
-      final double vLow = mvThresholds[i];
-      final double vHigh = mvThresholds[i + 1];
-      if (clamped >= vLow && clamped <= vHigh) {
-        return i + (mv - vLow) / (vHigh - vLow);
-      }
-    }
-    return 0.0;
+    if (clamped < 50.0) return 0.0;
+    return ((clamped / 3300.0) * 12.0).clamp(0.0, 12.0);
   }
 
   static double calculateOldLinearUVI(double mv) =>
@@ -658,7 +640,7 @@ from(bucket: "$_influxBucket")
       double raw = double.tryParse(
               (data['mv_raw'] ?? data['sensor_mv'] ?? '0').toString()) ??
           0.0;
-      if (raw < 128.0) raw = 0.0;
+      if (raw < 50.0) raw = 0.0;
       raw = raw.clamp(0.0, 3300.0);
 
       final int rssi = int.tryParse((data['rssi_dbm'] ?? '0').toString()) ?? 0;
@@ -682,7 +664,7 @@ from(bucket: "$_influxBucket")
 
   void _compute3FiltersLocallyAndRecord(double raw, int rssi,
       {required String source}) {
-    final double clampedRaw = (raw < 128.0) ? 0.0 : raw.clamp(0.0, 3300.0);
+    final double clampedRaw = (raw < 50.0) ? 0.0 : raw.clamp(0.0, 3300.0);
     _winBuf.add(clampedRaw);
     if (_winBuf.length > 9) _winBuf.removeAt(0);
 
