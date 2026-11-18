@@ -12,9 +12,9 @@
 const char* WIFI_SSID     = "Nokia";
 const char* WIFI_PASSWORD = "Password";
 
-#define UV_SENSOR_PIN 2
-#define I2C_SDA_PIN   8
-#define I2C_SCL_PIN   9
+#define UV_SENSOR_PIN 2   
+#define I2C_SDA_PIN   8   
+#define I2C_SCL_PIN   9   
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT 64
 
@@ -52,25 +52,12 @@ float currentUvIndex  = 0.0f;
 String currentRisk    = "Low";
 int currentRssi       = 0;
 
-// Expanded 0-4500mV Sunlight Scale so direct sun doesn't peg at 12 immediately
-const float UVI_THRESHOLDS[12] = {
-  128.0f, 680.0f, 980.0f, 1300.0f, 1650.0f, 2000.0f,
-  2350.0f, 2700.0f, 3050.0f, 3400.0f, 3800.0f, 4150.0f
-};
-
-float getCalibratedUVI(float mv) {
-  if (mv < UVI_THRESHOLDS[0]) return 0.0f;
-  if (mv >= UVI_THRESHOLDS[11]) {
-    float finalSlope = (11.0f - 10.0f) / (UVI_THRESHOLDS[11] - UVI_THRESHOLDS[10]);
-    float uvi = 11.0f + ((mv - UVI_THRESHOLDS[11]) * finalSlope);
-    return (uvi > 12.0f) ? 12.0f : uvi;
-  }
-  for (int i = 0; i < 11; i++) {
-    if (mv >= UVI_THRESHOLDS[i] && mv <= UVI_THRESHOLDS[i+1]) {
-      return i + ((mv - UVI_THRESHOLDS[i]) / (UVI_THRESHOLDS[i+1] - UVI_THRESHOLDS[i]));
-    }
-  }
-  return 0.0f;
+// Research Paper Calibration Model: UV Index = 1.3993 * Voltage(V) + 0.0297
+float calculatePaperUVI(float mv) {
+  float volts = mv / 1000.0f;
+  if (volts < 0.02f) return 0.0f;
+  float uvi = (1.3993f * volts) + 0.0297f;
+  return (uvi < 0.0f) ? 0.0f : uvi;
 }
 
 String getRiskCategory(float uvi) {
@@ -90,18 +77,24 @@ String getShortOledRisk(float uvi) {
 }
 
 float readAveragedMilliVolts() {
-  uint32_t totalMv = 0;
+  uint32_t totalRaw = 0;
   for (int i = 0; i < 32; i++) {
-    totalMv += analogReadMilliVolts(UV_SENSOR_PIN);
+    totalRaw += analogRead(UV_SENSOR_PIN);
     delayMicroseconds(250);
   }
-  return (totalMv / 32.0f);
+  float avgRaw = totalRaw / 32.0f;
+  // Convert ADC count to millivolts using the 3.3V / 4095.0 ratio from the paper
+  return (avgRaw * 3300.0f) / 4095.0f;
 }
 
 void updateFiltersAndSensors() {
   float raw = readAveragedMilliVolts();
-  if (raw < UVI_THRESHOLDS[0]) raw = 0.0f;
-  float clampedRaw = constrain(raw, 0.0f, 4500.0f);
+
+  if (raw < 50.0f) {
+    raw = 0.0f;
+  }
+
+  float clampedRaw = constrain(raw, 0.0f, 3300.0f);
   currentMvRaw = clampedRaw;
 
   winBuf[winIdx] = clampedRaw;
@@ -138,17 +131,17 @@ void updateFiltersAndSensors() {
     hybP = (1.0f - hG) * hybP;
   }
 
-  currentMvKalman = constrain(kalX, 0.0f, 4500.0f);
-  currentMvHybrid = constrain(hybX, 0.0f, 4500.0f);
+  currentMvKalman = constrain(kalX, 0.0f, 3300.0f);
+  currentMvHybrid = constrain(hybX, 0.0f, 3300.0f);
 
-  if (currentMvHybrid < UVI_THRESHOLDS[0]) {
+  if (currentMvHybrid < 50.0f) {
     currentMvHybrid = 0.0f;
     currentMvRaw    = 0.0f;
     currentMvMedian = 0.0f;
     currentMvKalman = 0.0f;
   }
 
-  currentUvIndex = getCalibratedUVI(currentMvHybrid);
+  currentUvIndex = calculatePaperUVI(currentMvHybrid);
   currentRisk    = getRiskCategory(currentUvIndex);
   currentRssi    = WiFi.RSSI();
 }
@@ -187,14 +180,21 @@ void connectWiFi() {
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
     display.println("Connecting Wi-Fi...");
+    display.print("SSID: ");
+    display.println(WIFI_SSID);
     display.display();
   }
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("Connected!");
+  display.println("ESP32 Connected!");
+  display.setCursor(0, 16);
+  display.println("IP Address:");
+  display.setCursor(0, 32);
+  display.println(WiFi.localIP().toString());
   display.display();
-  delay(1500);
+  delay(2000);
 }
 
 void publishToInfluxDb() {
@@ -214,8 +214,6 @@ void publishToInfluxDb() {
 
     String lineProtocol = String("uv_measurement,device=") + DEVICE_ID + " ";
     lineProtocol += "voltage_raw_mv=" + String(currentMvRaw, 2) + ",";
-    lineProtocol += "voltage_median_mv=" + String(currentMvMedian, 2) + ",";
-    lineProtocol += "voltage_kalman_mv=" + String(currentMvKalman, 2) + ",";
     lineProtocol += "voltage_hybrid_mv=" + String(currentMvHybrid, 2) + ",";
     lineProtocol += "uv_index_estimated=" + String(currentUvIndex, 3);
 
@@ -247,7 +245,11 @@ void setup() {
 
 void loop() {
   server.handleClient();
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
+
   if (!mqttClient.connected()) {
     String clientId = String(DEVICE_ID) + "_" + String(random(0xffff), HEX);
     mqttClient.connect(clientId.c_str());
@@ -264,9 +266,6 @@ void loop() {
     JsonDocument doc;
     doc["seq"]                = packetSeq;
     doc["device_id"]          = DEVICE_ID;
-    doc["mv_raw"]             = serialized(String(currentMvRaw, 2));
-    doc["mv_median"]          = serialized(String(currentMvMedian, 2));
-    doc["mv_kalman"]          = serialized(String(currentMvKalman, 2));
     doc["mv_hybrid"]          = serialized(String(currentMvHybrid, 2));
     doc["uv_index_estimated"] = serialized(String(currentUvIndex, 3));
     doc["risk_category"]      = currentRisk;
@@ -286,8 +285,8 @@ void loop() {
     display.printf("IP:%s\n", WiFi.localIP().toString().c_str());
     display.println("--------------------");
     display.printf("Hyb mV: %.2f\n", currentMvHybrid);
-    display.printf("UV Idx: %.2f (%s)\n", currentUvIndex, oledRisk.c_str());
-    display.printf("RSSI:   %d dBm (#%lu)\n", currentRssi, packetSeq);
+    display.printf("UV Idx:  %.2f (%s)\n", currentUvIndex, oledRisk.c_str());
+    display.printf("RSSI:    %d dBm (#%lu)\n", currentRssi, packetSeq);
     display.display();
   }
 }
